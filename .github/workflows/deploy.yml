@@ -76,39 +76,20 @@ jobs:
 
   # ---------- STEP 4: DEPLOY ----------
   deploy:
-    name: Deploy to the server
+    name: Deploy to Render
     needs: build-and-push # only runs if the build/push job succeeded
     runs-on: ubuntu-latest
     steps:
-      # SSH into the EC2 server and tell it to pull + run the new image.
-      # SERVER_HOST, SERVER_USER, SERVER_SSH_KEY and GHCR_TOKEN are all
-      # stored as encrypted GitHub repository secrets, never in this file.
-      - name: Deploy over SSH
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          script: |
-            # Log in to GHCR from the server so it's allowed to pull the image
-            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      # Render watches its own deploy hook URL: hitting it tells Render
+      # to pull the latest image from GHCR and restart the service.
+      # RENDER_DEPLOY_HOOK is stored as an encrypted GitHub repository
+      # secret, never in this file.
+      - name: Trigger Render deploy
+        run: curl -f "${{ secrets.RENDER_DEPLOY_HOOK }}"
 
-            # Pull the image that was just built and pushed
-            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-
-            # Stop and remove the currently running container, if any
-            docker stop deployready-app || true
-            docker rm deployready-app || true
-
-            # Start the new container: host port 80 -> container port 3000,
-            # auto-restart if the server reboots or the process crashes
-            docker run -d \
-              --name deployready-app \
-              -p 80:3000 \
-              -e PORT=3000 \
-              --restart unless-stopped \
-              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-
-            # Quick sanity check that the container is actually up
-            sleep 3
-            curl -f http://localhost:80/health
+      # Give Render a little time to pull the image and restart,
+      # then confirm the live service actually responds
+      - name: Verify health endpoint
+        run: |
+          sleep 30
+          curl -f ${{ secrets.RENDER_SERVICE_URL }}/health

@@ -1,49 +1,56 @@
 # DeployReady — Kora Analytics
 
-A containerised Node.js API with an automated test → build → push → deploy pipeline, deployed using Docker and Render.
+This project is a containerised Node.js API that I prepared to demonstrate DevOps practices including Docker, automated testing, CI/CD pipelines, and cloud deployment.
+
+The goal of this project was to remove manual deployment steps by creating an automated workflow where code changes are tested, built into a Docker image, and deployed automatically.
 
 ---
 
-# Architecture Overview
+# Project Architecture
 
 ```
- GitHub push to main
-        │
-        ▼
- ┌────────────────────┐
- │ GitHub Actions      │
- │                    │
- │ 1. npm test         │  <- stops if tests fail
- │ 2. docker build     │
- │ 3. push image       │
- └─────────┬──────────┘
-           │
-           ▼
- ┌────────────────────┐
- │ Render              │
- │                    │
- │ Docker container    │
- │ Node.js API         │
- │ PORT=3000           │
- └─────────┬──────────┘
-           │
-           ▼
-        Users
+Developer
+    |
+    | git push
+    ↓
+GitHub Repository
+    |
+    ↓
+GitHub Actions
+
+    1. Run tests
+    2. Build Docker image
+    3. Push Docker image
+
+    |
+    ↓
+
+Render Cloud Platform
+
+    |
+    ↓
+
+Running Node.js API
+
+    |
+    ↓
+
+Users
 ```
 
 ---
 
-# Application
+# Application Overview
 
 The application is located inside the `app/` directory.
 
-It is an Express.js API with three endpoints:
+It is a Node.js Express API with the following endpoints:
 
 | Method | Route | Description |
 |---|---|---|
-| GET | `/health` | Returns application health status |
-| GET | `/metrics` | Returns uptime and memory usage |
-| POST | `/data` | Accepts JSON data and returns it back |
+| GET | `/health` | Checks if the application is running |
+| GET | `/metrics` | Returns application uptime and memory usage |
+| POST | `/data` | Receives JSON data and returns it back |
 
 Example:
 
@@ -84,19 +91,19 @@ DeployReady/
 
 ---
 
-# Containerisation
+# Docker Containerisation
 
-The application is containerised using Docker.
+I used Docker to package the application and its dependencies into a container.
 
 The Docker setup:
 
-- Uses the lightweight `node:20-alpine` image
-- Installs Node.js dependencies
-- Accepts the `PORT` environment variable
-- Runs the application as a non-root user
-- Starts the Express API inside the container
+- Uses the `node:20-alpine` base image
+- Installs the required Node.js dependencies
+- Allows the application port to be configured using the `PORT` environment variable
+- Runs the application using a non-root user for better security
+- Starts the API inside the container
 
-The application listens on:
+The application runs on:
 
 ```
 PORT=3000
@@ -104,9 +111,11 @@ PORT=3000
 
 ---
 
-# Running Locally Without Docker
+# Running the Application Locally
 
-Navigate to the application folder:
+## Without Docker
+
+First, move into the application folder:
 
 ```bash
 cd app
@@ -118,19 +127,19 @@ Install dependencies:
 npm install
 ```
 
-Start the application:
+Start the server:
 
 ```bash
 npm start
 ```
 
-The API will run on:
+The API will run at:
 
 ```
 http://localhost:3000
 ```
 
-Test the health endpoint:
+To test:
 
 ```
 http://localhost:3000/health
@@ -146,34 +155,15 @@ Expected response:
 
 ---
 
-# Running Tests
-
-The project uses Node.js built-in testing.
-
-Run:
-
-```bash
-cd app
-npm test
-```
-
-The tests verify:
-
-- `/health` returns the correct response
-- `/metrics` returns uptime and memory usage
-- `/data` returns the submitted JSON body
-
----
-
 # Running With Docker Compose
 
-Create your environment file:
+Create the environment file:
 
 ```bash
 cp .env.example .env
 ```
 
-Build and start the container:
+Start the application:
 
 ```bash
 docker compose up --build
@@ -187,127 +177,100 @@ http://localhost:3000/health
 
 ---
 
+# Testing
+
+I used Node.js built-in testing to verify that the API works correctly.
+
+Run tests:
+
+```bash
+cd app
+npm test
+```
+
+The tests check:
+
+- The `/health` endpoint returns the correct status
+- The `/metrics` endpoint returns uptime and memory information
+- The `/data` endpoint correctly returns submitted JSON data
+
+---
+
 # CI/CD Pipeline
 
-The project uses GitHub Actions for continuous integration and deployment.
+I created a GitHub Actions workflow to automate the deployment process.
 
-Workflow file:
+The workflow is located at:
 
 ```
 .github/workflows/deploy.yml
 ```
 
-The pipeline runs automatically whenever code is pushed to the `main` branch.
+The pipeline runs automatically when I push changes to the `main` branch.
+
+---
 
 ## Continuous Integration (CI)
 
-The CI process checks that the application works before deployment.
+The CI part makes sure that new changes do not break the application.
 
-Steps:
+The pipeline:
 
-### 1. Install dependencies
-
-The pipeline installs Node.js packages.
-
-### 2. Run automated tests
-
-The pipeline runs:
+1. Installs dependencies
+2. Runs automated tests using:
 
 ```bash
 npm test
 ```
 
-If tests fail, the pipeline stops and deployment does not continue.
+If tests fail, the pipeline stops and the deployment process does not continue.
 
 ---
 
 ## Continuous Deployment (CD)
 
-After successful tests:
+After successful tests, the pipeline continues with deployment.
 
-### 1. Build Docker Image
+The process:
 
-GitHub Actions builds the Docker image.
+1. Builds the Docker image
+2. Tags the image using the Git commit SHA
+3. Pushes the image to GitHub Container Registry
+4. Deploys the application using Render
 
-The image is tagged using the Git commit SHA.
-
-Example:
-
-```
-deployready-app:<commit-sha>
-```
-
-### 2. Push Image
-
-The Docker image is pushed to GitHub Container Registry.
-
-### 3. Deploy Application
-
-The application is deployed using Render's Docker-based hosting platform.
-
-Render automatically builds and runs the container.
+This removes the need for manually uploading files or restarting the application.
 
 ---
 
 # Cloud Deployment
 
-## Cloud Provider
+For deployment, I used **Render** as my cloud platform.
 
-This project uses:
+I selected Render because it supports Docker deployments and provides a simple way to run containerised applications without managing a virtual machine manually.
 
-```
-Render
-```
-
-Render was selected because it provides Docker-based cloud deployment without requiring manual server management.
-
-Benefits:
-
-- Supports Docker containers
-- Automatic deployments
-- Environment variable management
-- Automatic application restarts
-- Simple cloud hosting setup
-
----
-
-# Deployment Process
-
-The deployment process is:
+The deployment process:
 
 ```
-Developer
-    |
-    |
-git push
-    |
-    ↓
 GitHub Repository
-    |
-    ↓
+        |
+        ↓
 GitHub Actions
-    |
-    ↓
-Run Tests
-    |
-    ↓
-Build Docker Image
-    |
-    ↓
-Push Image
-    |
-    ↓
+        |
+        ↓
+Docker Image
+        |
+        ↓
 Render Deployment
-    |
-    ↓
-Running API
+        |
+        ↓
+Live Application
 ```
 
 ---
 
 # Environment Variables
 
-The project uses environment variables for configuration.
+The application uses environment variables instead of storing configuration directly inside the code.
 
 Example:
 
@@ -315,78 +278,56 @@ Example:
 PORT=3000
 ```
 
-A template file is included:
+I included:
 
 ```
 .env.example
 ```
 
-Real environment files are not committed to GitHub.
+as a template.
+
+Sensitive information is not stored in the repository.
 
 ---
 
-# Deployment Verification
-
-After deployment, the API health endpoint can be checked:
-
-```
-https://<your-render-url>/health
-```
-
-Expected response:
-
-```json
-{
-  "status": "ok"
-}
-```
-
----
-
-# Design Decisions
+# My Implementation Decisions
 
 ## Docker
 
-Docker was used to package the application and its dependencies into a consistent environment.
+I used Docker because it allows the application to run consistently across different environments.
 
-This allows the application to run the same way locally and in the cloud.
+The same container can run locally and in the cloud.
 
 ---
 
 ## GitHub Actions
 
-GitHub Actions was selected to automate testing, building, and deployment.
+I used GitHub Actions to automate testing and deployment.
 
-This removes manual deployment steps and improves reliability.
+This reduces manual work and ensures that only tested code is deployed.
 
 ---
 
 ## GitHub Container Registry
 
-GitHub Container Registry was chosen because it integrates directly with GitHub Actions and provides secure Docker image storage.
+I used GitHub Container Registry to store Docker images because it integrates well with GitHub Actions.
 
 ---
 
-## Render Deployment
+## Render
 
-Render was selected because it provides managed Docker deployment without requiring manual server configuration.
+I chose Render because it provides an easy Docker deployment process without requiring paid cloud infrastructure setup.
 
-This allows focusing on the application and DevOps workflow instead of server maintenance.
-
----
-
-## Testing
-
-Node.js built-in testing (`node --test`) was used because it is included with modern Node.js versions and avoids unnecessary dependencies.
+It allows me to focus on the DevOps workflow while still deploying a real cloud application.
 
 ---
 
 # Future Improvements
 
-Possible improvements include:
+Some improvements I would add in the future:
 
-- Add application monitoring and alerts
+- Add monitoring and alerts
 - Add automatic rollback after failed deployments
-- Add Infrastructure as Code using Terraform
-- Add more API test coverage
+- Add more API tests
+- Use Infrastructure as Code tools such as Terraform
 - Add security scanning for Docker images

@@ -2,142 +2,91 @@
 
 ## Cloud provider and service
 
-**AWS EC2** (a single `t2.micro` instance, part of the AWS Free Tier).
+**Render.com** (free "Web Service" tier, deployed from a Docker image).
 
-Why: EC2 is the simplest way to get a real Linux server with a public IP that
-runs Docker, it's free for 12 months on a new account, and it matches the
-"SSH in, pull image, restart container" deploy model asked for in the brief.
-No Kubernetes, load balancers, or managed container services are needed for
-a project this size.
+### Why Render, and why not AWS/GCP/Azure
 
-## 1. Create the EC2 instance
+The original plan was AWS EC2 (`t2.micro`, free tier). In practice, AWS
+requires a verified payment method before it will let you launch an actual
+instance — even the "no-cost" `t2.micro` free tier sits behind that wall
+once you try to use compute, not just create an account. Without access to
+a card, that path was blocked.
 
-1. Sign in to the [AWS Console](https://console.aws.amazon.com/) and go to **EC2**.
-2. Click **Launch Instance**.
-3. Name it e.g. `deployready-server`.
-4. **AMI**: choose **Ubuntu Server 22.04 LTS** (free tier eligible).
-5. **Instance type**: `t2.micro` (free tier eligible).
-6. **Key pair**: click **Create new key pair**, name it `deployready-key`,
-   type RSA, format `.pem`. Download it and keep it somewhere safe — you
-   cannot download it again later. On Mac/Linux run
-   `chmod 400 deployready-key.pem` so SSH will accept it.
-7. **Network settings / Firewall (security group)** — click **Edit** and set
-   exactly these two inbound rules:
-   - **SSH (port 22)** — Source: **My IP** (NOT Anywhere/0.0.0.0/0). This
-     restricts SSH to your current IP address only.
-   - **HTTP (port 80)** — Source: **Anywhere (0.0.0.0/0)**. This is what lets
-     the internet reach `/health`.
-8. Leave storage at the default 8 GB gp3.
-9. Click **Launch instance**. Wait ~1 minute, then find its **Public IPv4
-   address** on the instance detail page — you'll need it repeatedly below.
+Render was chosen as a deliberate substitute: it runs real Docker
+containers, requires no payment method at all on its free tier, and gives
+a genuine public HTTPS URL — which satisfies the actual goal of Part 3
+(a running, publicly reachable service). The trade-off is that Render is a
+**PaaS** (Platform-as-a-Service), not raw IaaS, so there is no EC2-style
+VM to SSH into, no security group to configure by hand, and no IAM role to
+scope — Render manages the underlying infrastructure itself. If a card
+becomes available later, the app can be redeployed to AWS EC2 with no
+code changes, since the Dockerfile and app are cloud-agnostic.
 
-> Note on IAM: this deploy method only needs SSH access to the box, not
-> AWS API access, so no IAM user/role is required for the GitHub Actions
-> pipeline itself. If you do the Terraform bonus, create a separate IAM
-> user scoped to just `ec2:*` on this one instance rather than using your
-> root/admin credentials.
+## 1. Create the Render Web Service
 
-## 2. Connect and install Docker
+1. Sign up at [render.com](https://render.com) (GitHub login is fastest,
+   no card required).
+2. Push this repo to GitHub first (see main `README.md`).
+3. In the Render dashboard, click **New +** → **Web Service**.
+4. Connect your GitHub account and select this repository.
+5. Render auto-detects the `Dockerfile` at the repo root — leave
+   **Environment: Docker**.
+6. **Instance Type**: Free.
+7. Add an environment variable: `PORT` = `10000` (Render's free tier
+   listens on port `10000` by default — our app already reads `PORT` from
+   the environment, so no code change is needed).
+8. Click **Create Web Service**. Render will build the Docker image and
+   deploy it. First build can take a few minutes.
+9. Once live, Render gives you a public URL like
+   `https://deployready-xxxx.onrender.com`. That's your server's public
+   address for the rest of this guide.
 
-SSH in (replace with your key path and the instance's public IP):
+## 2. Get the deploy hook and connect the pipeline
 
-```bash
-ssh -i deployready-key.pem ubuntu@<your-server-ip>
-```
+1. In the Render dashboard, go to your service → **Settings** →
+   **Deploy Hook**. Copy the URL shown (it's a private, secret URL —
+   hitting it with a simple `curl` or browser request triggers a new
+   deploy).
+2. In your GitHub repo: **Settings → Secrets and variables → Actions →
+   New repository secret**. Add:
 
-Once connected, install Docker:
+| Secret name          | Value                                              |
+|-----------------------|-----------------------------------------------------|
+| `RENDER_DEPLOY_HOOK`  | The deploy hook URL from step 1                    |
+| `RENDER_SERVICE_URL`  | Your service's public URL, e.g. `https://deployready-xxxx.onrender.com` |
 
-```bash
-# Update package lists
-sudo apt-get update -y
+Push to `main` and watch the **Actions** tab — the pipeline tests, builds
+and pushes to GHCR, then hits the Render deploy hook and verifies
+`/health`.
 
-# Install Docker's official install script
-curl -fsSL https://get.docker.com -o get-docker.sh
-sudo sh get-docker.sh
-
-# Let the ubuntu user run docker without sudo
-sudo usermod -aG docker ubuntu
-
-# Log out and back in for the group change to apply
-exit
-```
-
-SSH back in, then confirm Docker works:
+## 3. Verify
 
 ```bash
-ssh -i deployready-key.pem ubuntu@<your-server-ip>
-docker --version
-```
-
-## 3. First manual deploy (so /health responds immediately)
-
-Before the pipeline can deploy automatically, images need to exist in the
-registry at least once. The easiest way is to just push to `main` after
-setting up the GitHub secrets below — GitHub Actions will build, push, and
-SSH-deploy for you. If you want to sanity-check Docker on the server first,
-you can manually pull any public test image, e.g.:
-
-```bash
-docker run -d -p 80:80 --name test nginx
-curl http://localhost/health   # (won't return {"status":"ok"} yet — just checking connectivity)
-docker rm -f test
-```
-
-## 4. GitHub repository secrets
-
-In your GitHub repo: **Settings → Secrets and variables → Actions → New
-repository secret**. Add:
-
-| Secret name       | Value                                                              |
-|-------------------|---------------------------------------------------------------------|
-| `SERVER_HOST`     | Your EC2 public IP                                                  |
-| `SERVER_USER`     | `ubuntu`                                                             |
-| `SERVER_SSH_KEY`  | The full contents of `deployready-key.pem` (private key)            |
-| `GHCR_TOKEN`      | A GitHub Personal Access Token with `read:packages` scope, so the server can pull the private image from GHCR |
-
-To create the PAT: GitHub profile → **Settings → Developer settings →
-Personal access tokens → Tokens (classic) → Generate new token**, scope
-`read:packages` only.
-
-Once these secrets exist, push to `main` and watch the **Actions** tab —
-the pipeline will test, build, push to `ghcr.io`, then SSH in and start the
-container on port 80.
-
-## 5. Verify
-
-```bash
-curl http://<your-server-ip>/health
+curl https://deployready-xxxx.onrender.com/health
 # {"status":"ok"}
 ```
 
-## 6. Checking the container / logs (from an SSH session on the server)
+Note: Render's free web services spin down after ~15 minutes of no
+traffic and take 30-60 seconds to wake back up on the next request. If
+`/health` seems slow the first time you hit it, that's why — it's not
+broken, just waking up.
 
-**Is it running?**
+## 4. Checking the container / logs
 
-```bash
-docker ps
-```
+Render doesn't give SSH access on the free tier, but the dashboard covers
+the same needs:
 
-You should see `deployready-app` listed with status `Up`.
-
-**View logs:**
-
-```bash
-docker logs deployready-app          # recent logs
-docker logs -f deployready-app       # follow logs live
-docker logs --tail 100 deployready-app
-```
-
-**Restart it manually if needed:**
-
-```bash
-docker restart deployready-app
-```
+- **Is it running?** Open the service in the Render dashboard — the
+  status badge shows **Live** (green) or **Deploying**/**Failed**.
+- **View logs**: click the **Logs** tab on the service page — this shows
+  the same stdout/stderr `docker logs` would show, streamed live.
+- **Restart manually**: **Manual Deploy → Deploy latest commit**, or the
+  **Restart** option in the service's menu.
 
 ## Bonus (not implemented in this submission)
 
-Optional next steps if you want to go further: provisioning the VM and
-security group with Terraform instead of the console, adding a CloudWatch
-alarm on `/health`, or adding an automatic rollback step in the pipeline
-that re-deploys the previous image tag if the post-deploy health check
-fails.
+If a card becomes available, the natural next step is redeploying this
+same Docker image to AWS EC2 following the original SSH-based deploy
+model. Other optional extensions: Terraform for infra-as-code, a
+monitoring alarm on `/health`, or an automatic rollback step if the
+post-deploy health check fails.
